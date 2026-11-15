@@ -2,6 +2,9 @@
 
 ## 0.1.1 - 2026-11-15
 
+- `ignore_other_unit`: reports in the other unit (a second, late source of the same thermostat) are left unread.
+- A late report of the old target (a thermostat Home Assistant hears of from two sides) no longer sets the number back
+  for four minutes after a change made here.
 - Large - and + keys beside the dial on its card: hold one and it keeps stepping.
 - Fixed: after - or + the number jumped back to the old target until the thermostat answered (the wait for Home
   Assistant ended the moment it began; Thermo dial has the same fault).

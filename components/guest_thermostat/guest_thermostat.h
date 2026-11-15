@@ -1,4 +1,7 @@
 #pragma once
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include "esphome/core/component.h"
 #include "esphome/components/smart_display/plugin_api.h"
 #include "esphome/components/switch/switch.h"
@@ -28,6 +31,10 @@ class GuestThermostat : public Component, public tessera::Plugin {
     hi_ = (int) std::lround(hi * 10.0f);
   }
   void set_native_fahrenheit(bool f) { native_f_ = f; }
+  // A report in the other unit comes from a second source of the same thermostat (Home Assistant's own cloud
+  // integration beside a mirrored entity, minutes behind): it is left unread once a report in the own unit was seen.
+  void set_ignore_other_unit(bool v) { ignore_other_unit_ = v; }
+  bool ignore_other_unit() const { return ignore_other_unit_; }
   // The switch "Thermostat shows Fahrenheit": what the glass shows, whatever the thermostat's own unit.
   void set_fahrenheit_switch(switch_::Switch *s) { fahrenheit_ = s; }
   int lo() const { return lo_; }
@@ -42,6 +49,31 @@ class GuestThermostat : public Component, public tessera::Plugin {
     bar_current_ = current;
     bar_known_ = true;
   }
+  // A target was chosen here (tenths; `was` is what the thermostat said before). For HOLD_MS a report that still names
+  // an old target is a late one and counts as the chosen target: a thermostat that Home Assistant hears of from two
+  // sides (its cloud, minutes behind, and a second Home Assistant, at once) says the old and the new in turns.
+  void chose(const char *entity, int was, int now_value) {
+    if (!hold_on_ || std::strcmp(entity, hold_entity_) != 0) hold_olds_ = 0;
+    else if (hold_olds_ < 4) hold_old_[hold_olds_++] = hold_new_;   // the target chosen just before is an old one too
+    std::snprintf(hold_entity_, sizeof hold_entity_, "%s", entity);
+    if (hold_olds_ < 4) hold_old_[hold_olds_++] = was;
+    hold_new_ = now_value;
+    hold_since_ = millis();
+    hold_on_ = true;
+  }
+  // What to believe of a reported target (tenths): the chosen one while a late report names an old one.
+  int trust(const char *entity, int reported) {
+    if (!hold_on_ || std::strcmp(entity, hold_entity_) != 0) return reported;
+    if ((uint32_t)(millis() - hold_since_) >= HOLD_MS) {
+      hold_on_ = false;
+      return reported;
+    }
+    if (std::abs(reported - hold_new_) <= 3) return reported;
+    for (int i = 0; i < hold_olds_; ++i)
+      if (std::abs(reported - hold_old_[i]) <= 3) return hold_new_;
+    hold_on_ = false;   // a third target: somebody chose it elsewhere
+    return reported;
+  }
   // A number from Home Assistant in the thermostat's own unit: one that can only be the other unit is converted.
   double normalize(double value) const;
   // A temperature (tenths, the thermostat's unit) as the glass shows it now: "18.5\u00b0C" or "65\u00b0F".
@@ -51,8 +83,13 @@ class GuestThermostat : public Component, public tessera::Plugin {
   DialTile *tiles_[MAX_TILES]{};
   switch_::Switch *fahrenheit_{};
   int lo_ = 70, hi_ = 250;
-  bool native_f_ = false, bar_known_ = false;
+  bool native_f_ = false, bar_known_ = false, ignore_other_unit_ = false;
   int bar_mood_ = 0, bar_current_ = 0;
+  static constexpr uint32_t HOLD_MS = 240000;
+  char hold_entity_[96]{};
+  int hold_old_[4]{}, hold_olds_ = 0, hold_new_ = 0;
+  uint32_t hold_since_ = 0;
+  bool hold_on_ = false;
 };
 
 }  // namespace esphome::guest_thermostat

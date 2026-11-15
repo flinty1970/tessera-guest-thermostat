@@ -44,6 +44,7 @@ struct Reading {
   char state_word[MODE_LEN]{};
   char modes[MAX_MODES][MODE_LEN]{};
   int modes_n = 0;
+  bool own_seen = false;
 
   static int number_of(JsonVariantConst v, const GuestThermostat *plugin) {
     return v.is<float>() || v.is<int>() ? tenths(plugin->normalize(v.as<double>())) : NO_VALUE;
@@ -56,6 +57,10 @@ struct Reading {
     JsonObjectConst a = data["attributes"];
     const double lo = a["min_temp"] | 7.0, hi = a["max_temp"] | 35.0;
     const bool foreign = plugin->normalize(lo) != lo || plugin->normalize(hi) != hi;
+    if (plugin->ignore_other_unit()) {
+      if (foreign && own_seen) return;   // the late second source: what the own source said stands
+      if (!foreign) own_seen = true;
+    }
     const double native_step = plugin->native_fahrenheit() ? 1.0 : 0.5;
     range = make_range(plugin->normalize(lo), plugin->normalize(hi), foreign ? native_step : (a["target_temp_step"] | native_step));
     range.lo = std::max(range.lo, plugin->lo());
@@ -173,6 +178,8 @@ class DialTile : public tessera::Tile {
 
   void on_state(JsonObjectConst data) override {
     reading_.read(data, plugin_);
+    raw_ = reading_.reported;
+    if (raw_ != NO_VALUE) reading_.reported = plugin_->trust(entity_, raw_);
     plugin_->note(static_cast<int>(reading_.mood), reading_.current);
     if (pending_active_ && reading_.reported != NO_VALUE && std::abs(reading_.reported - pending_) <= NEAR) settle();   // Home Assistant brought the target we chose
     if (!pending_active_) shown_ = reading_.reported;
@@ -220,7 +227,13 @@ class DialTile : public tessera::Tile {
       send(shown_);
     }
     if (confirm_on_ && expired(now, confirm_since_, CONFIRM_MS)) {
-      settle();                          // Home Assistant did not follow: back to what it says
+      settle();                          // no answer yet: the wait ends, the chosen target stays until HOLD_MS
+      shown_ = reading_.reported;
+      apply();
+    }
+    // A late report was set aside for a while: when that while is over, what Home Assistant says counts again.
+    if (!pending_active_ && !debounce_on_ && raw_ != NO_VALUE && plugin_->trust(entity_, raw_) != reading_.reported) {
+      reading_.reported = plugin_->trust(entity_, raw_);
       shown_ = reading_.reported;
       apply();
     }
@@ -340,6 +353,8 @@ class DialTile : public tessera::Tile {
     }
     pending_ = value;
     pending_active_ = true;
+    if (raw_ != NO_VALUE) plugin_->chose(entity_, raw_, value);
+    reading_.reported = value;   // believed until Home Assistant names a third
     JsonDocument fields;
     fields["temperature"] = value / 10.0;   // tenths of a degree, sent as a number
     tessera::action("climate.set_temperature", entity_, fields);
@@ -373,7 +388,7 @@ class DialTile : public tessera::Tile {
   Layout layout_;
   SideLayout side_;
   char decimal_ = '.';
-  int shown_ = NO_VALUE, pending_ = NO_VALUE;
+  int shown_ = NO_VALUE, pending_ = NO_VALUE, raw_ = NO_VALUE;
   bool pending_active_ = false, attached_ = false, unit_f_ = false;
   bool debounce_on_ = false, confirm_on_ = false;
   uint32_t debounce_since_ = 0, confirm_since_ = 0;
@@ -471,6 +486,8 @@ class DialCard : public tessera::Card {
 
   void on_state(JsonObjectConst data) override {
     reading_.read(data, plugin_);
+    raw_ = reading_.reported;
+    if (raw_ != NO_VALUE) reading_.reported = plugin_->trust(entity_, raw_);
     if (pending_active_ && reading_.reported != NO_VALUE && std::abs(reading_.reported - pending_) <= NEAR) settle();   // Home Assistant brought the target we chose
     if (!dragging_ && !pending_active_) shown_ = reading_.reported;
     if (!dragging_) apply();                                            // under a finger the dial does not move
@@ -484,7 +501,13 @@ class DialCard : public tessera::Card {
       apply();
     }
     if (confirm_on_ && expired(millis(), confirm_since_, CONFIRM_MS)) {
-      settle();                          // Home Assistant did not follow: back to what it says
+      settle();                          // no answer yet: the wait ends, the chosen target stays until HOLD_MS
+      shown_ = reading_.reported;
+      if (!dragging_) apply();
+    }
+    // A late report was set aside for a while: when that while is over, what Home Assistant says counts again.
+    if (!pending_active_ && !debounce_on_ && raw_ != NO_VALUE && plugin_->trust(entity_, raw_) != reading_.reported) {
+      reading_.reported = plugin_->trust(entity_, raw_);
       shown_ = reading_.reported;
       if (!dragging_) apply();
     }
@@ -646,6 +669,8 @@ class DialCard : public tessera::Card {
     }
     pending_ = value;
     pending_active_ = true;
+    if (raw_ != NO_VALUE) plugin_->chose(entity_, raw_, value);
+    reading_.reported = value;   // believed until Home Assistant names a third
     JsonDocument fields;
     fields["temperature"] = value / 10.0;   // tenths of a degree, sent as a number
     tessera::action("climate.set_temperature", entity_, fields);
@@ -703,7 +728,7 @@ class DialCard : public tessera::Card {
   Font face_ = Font::VALUE, now_face_ = Font::BODY_LARGE;
   bool show_now_ = false, show_state_ = false;
   char decimal_ = '.';
-  int shown_ = NO_VALUE, pending_ = NO_VALUE;
+  int shown_ = NO_VALUE, pending_ = NO_VALUE, raw_ = NO_VALUE;
   bool pending_active_ = false, dragging_ = false, confirm_on_ = false, debounce_on_ = false;
   uint32_t confirm_since_ = 0, debounce_since_ = 0;
   lv_obj_t *arc_{}, *center_{}, *now_{}, *state_{}, *glyph_{}, *unit_block_{}, *unit_label_{}, *status_block_{}, *status_label_{}, *status_icon_{};
@@ -724,8 +749,8 @@ void GuestThermostat::setup() {
     const Mood mood = static_cast<Mood>(bar_mood_);
     if (mood == Mood::UNAVAILABLE) return item;
     item.shown = true;
-    item.icon = glyph_code(glyph_of(mood));
-    item.tone = mood_tone(mood);
+    item.icon = 0xF0238;   // a flame always: red while it heats, green while it rests
+    item.tone = mood == Mood::HEATING ? tessera::Tone::ALERT : tessera::Tone::GOOD;
     if (bar_current_ != NO_VALUE) item.text = show(bar_current_, decimal_of(this));
     return item;
   });

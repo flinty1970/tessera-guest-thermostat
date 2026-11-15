@@ -14,3 +14,4 @@ guest_thermostat:
   min_temp: 7
   max_temp: 32
   unit: C
+  ignore_other_unit: true

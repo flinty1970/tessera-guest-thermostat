@@ -24,6 +24,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_MIN_TEMP, default=7.0): cv.float_,
         cv.Optional(CONF_MAX_TEMP, default=25.0): cv.float_,
         cv.Optional(CONF_UNIT, default="C"): cv.one_of("C", "F", upper=True),
+        cv.Optional("ignore_other_unit", default=False): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -34,5 +35,6 @@ async def to_code(config):
     await smart_display.register_plugin(var, __file__)
     cg.add(var.set_limits(config[CONF_MIN_TEMP], config[CONF_MAX_TEMP]))
     cg.add(var.set_native_fahrenheit(config[CONF_UNIT] == "F"))
+    cg.add(var.set_ignore_other_unit(config["ignore_other_unit"]))
     if CONF_FAHRENHEIT in config:
         cg.add(var.set_fahrenheit_switch(await cg.get_variable(config[CONF_FAHRENHEIT])))

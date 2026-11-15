@@ -22,7 +22,7 @@ cards:
 
 # In the top bar: what the heating does (a red flame, or the resting icon in green) and the temperature now.
 bar_items:
-  - { id: heating, label: bar_heating, icon: thermometer, example: bar_example }
+  - { id: heating, label: bar_heating, icon: fire, example: bar_example }
 
 tiles:
   - id: dial
