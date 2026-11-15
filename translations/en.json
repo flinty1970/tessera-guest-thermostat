@@ -11,7 +11,9 @@
     "off": "Off",
     "unavailable": "Unavailable",
     "show_f": "Show \u00b0F",
-    "show_c": "Show \u00b0C"
+    "show_c": "Show \u00b0C",
+    "target": "Target {n}",
+    "tap_adjust": "Tap to adjust"
   },
   "app": {
     "name": "Guest thermostat",

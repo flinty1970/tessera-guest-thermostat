@@ -112,8 +112,8 @@ static char decimal_of(const tessera::Plugin *plugin) {
   return *separator ? *separator : '.';
 }
 
-// ---- The tile: the target, the temperature now and the keys; a tap anywhere else opens the card with the dial. Two cells
-// wide and one high, - and + stand at the sides and the number between them ----
+// ---- The tile: a gauge of the room's temperature, what the heating does and its target, and a key for the unit. Nothing
+// is set here: a tap anywhere but on that key opens the card with the dial ----
 class DialTile : public tessera::Tile {
  public:
   explicit DialTile(GuestThermostat *plugin) : plugin_(plugin) {}
@@ -125,54 +125,71 @@ class DialTile : public tessera::Tile {
     h_ = c.height;
     tile_ = c.tile;
     decimal_ = decimal_of(plugin_);
-    // The keys are a finger high, and higher on a tile with room: a third of a tile three cells high.
-    const int key_h = std::max(ui::mm(9), std::min(ui::mm(16), c.rows >= 2 ? c.height / 4 : 0)), gap = ui::px(4);
-    layout_ = layout(w_, h_, c.columns, c.rows, key_h, ui::mm(3) + ui::px(6), true, false);
-    columns_ = c.columns;
+    const int gap = ui::px(4);
     const int body_h = ui::line_height(Font::BODY), value_h = ui::line_height(Font::VALUE);
-    const int info_h = std::max(body_h, ui::line_height(Font::ICON_SMALL));
-    // Wide and one cell high: - and + at the sides, the number and what is under it between them.
-    side_ = side_layout(w_, h_, c.columns, c.rows, ui::mm(12), ui::mm(14), gap);
-    if (side_.on) {
-      layout_.keys = false;
-      layout_.key_h = 0;
-    }
-    // The name, the number and the keys must fit one over the other, or the keys stay out.
-    if (layout_.keys && body_h + value_h + 3 * gap + key_h > h_) {
-      layout_.keys = false;
-      layout_.key_h = 0;
-    }
-    keys_on_ = layout_.keys || side_.on;
-    // The number (and under it the temperature now and the state) stands in the middle of what the name and the keys
-    // leave free; the keys are at the bottom, under the words (at the sides when the tile is one cell high).
-    // At the sides the name stays only if it fits above the number and what is under it.
-    const bool name_fits = !side_.on || h_ >= body_h + value_h + 2 * gap + info_h;
-    const int top = name_fits ? body_h : 0, bottom = layout_.keys ? layout_.keys_y : h_;
-    region_x_ = side_.on ? side_.mid_x : 0;
-    region_w_ = side_.on ? side_.mid_w : w_;
-    show_info_ = bottom - top >= value_h + gap + info_h;
-    const int block = value_h + (show_info_ ? gap + info_h : 0);
-    const int y0 = top + std::max(0, (bottom - top - block) / 2);
-    info_y_ = y0 + value_h + gap;
-    info_h_ = info_h;
+    const int row_h = std::max(body_h, ui::line_height(Font::ICON_SMALL));
 
     name_ = ui::label(c.parent, Font::BODY, theme::MUTED);
     ui::set_text(name_, c.name);
-    lv_obj_set_width(name_, region_w_);
-    lv_obj_set_pos(name_, region_x_, 0);
-    if (side_.on) lv_obj_set_style_text_align(name_, LV_TEXT_ALIGN_CENTER, 0);
-    if (!name_fits) lv_obj_add_flag(name_, LV_OBJ_FLAG_HIDDEN);
-    center_ = ui::label(c.parent, Font::VALUE, theme::INK);
-    lv_obj_set_width(center_, region_w_);
-    lv_obj_set_style_text_align(center_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(center_, region_x_, y0);
-    if (show_info_) {
-      now_ = ui::label(c.parent, Font::BODY, theme::MUTED);
-      glyph_ = ui::label(c.parent, Font::ICON_SMALL, theme::INK);
+    lv_obj_set_width(name_, w_);
+    lv_obj_set_pos(name_, 0, 0);
+    int top = body_h + gap;
+    // Under the name: what the heating does and its target ("Heating · Target 21.0°C"), where there is room for it.
+    if (h_ >= top + row_h + gap + value_h) {
+      status_icon_ = ui::label(c.parent, Font::ICON_SMALL, theme::INK);
+      status_ = ui::label(c.parent, Font::BODY, theme::INK);
+      status_y_ = top;
+      status_h_ = row_h;
+      top += row_h + gap;
     }
-    if (keys_on_) make_keys(c);
-    attached_ = plugin_->attach(this);
-    unit_f_ = plugin_->shows_fahrenheit();
+    // At the bottom: "Tap to adjust", and at its right the key for the unit on a tile two cells wide.
+    int bottom = h_;
+    const int key_h = ui::mm(9);
+    if (h_ - top >= value_h + gap + key_h) {
+      bottom = h_ - key_h - gap;
+      int hint_w = w_;
+      if (c.columns >= 2) {
+        key_w_ = std::min(w_ / 3, ui::mm(20));
+        key_h_ = key_h;
+        key_x_ = w_ - key_w_;
+        key_y_ = h_ - key_h_;
+        key_ = ui::block(c.parent, theme::TRACK);
+        lv_obj_set_size(key_, key_w_, key_h_);
+        lv_obj_set_pos(key_, key_x_, key_y_);
+        key_label_ = ui::label(key_, Font::BODY, theme::INK);
+        lv_obj_set_width(key_label_, key_w_);
+        lv_obj_set_style_text_align(key_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(key_label_, 0, (key_h_ - body_h) / 2);
+        hint_w = w_ - key_w_ - gap;
+      }
+      hint_ = ui::label(c.parent, Font::BODY, theme::MUTED);
+      ui::set_text(hint_, plugin_->text("tap_adjust"));
+      lv_obj_set_width(hint_, hint_w);
+      lv_obj_set_pos(hint_, 0, h_ - key_h + (key_h - body_h) / 2);
+    }
+    // Between them the gauge, an arc as on the dial that fills to the room's temperature, with that number in it. A
+    // tile too small for the ring has the number alone.
+    const int room = bottom - top, d = std::min(w_, room);
+    const int ring = std::max(ui::px(6), d / 12);
+    if (d >= ui::text_width("88.8\xC2\xB0" "C", Font::VALUE) + 2 * ring + ui::px(12)) {
+      arc_ = lv_arc_create(c.parent);
+      lv_obj_remove_style_all(arc_);
+      lv_obj_set_size(arc_, d, d);
+      lv_obj_set_pos(arc_, (w_ - d) / 2, top + (room - d) / 2);
+      lv_arc_set_rotation(arc_, 135);
+      lv_arc_set_bg_angles(arc_, 0, 270);
+      lv_arc_set_range(arc_, 0, 100);
+      for (lv_part_t part : {LV_PART_MAIN, LV_PART_INDICATOR}) {
+        lv_obj_set_style_arc_width(arc_, ring, part);
+        lv_obj_set_style_arc_rounded(arc_, true, part);
+      }
+      lv_obj_remove_flag(arc_, LV_OBJ_FLAG_CLICKABLE);   // a gauge only: the finger goes through to the tile
+    }
+    center_ = ui::label(c.parent, Font::VALUE, theme::INK);
+    lv_obj_set_width(center_, w_);
+    lv_obj_set_style_text_align(center_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(center_, 0, top + std::max(0, (room - value_h) / 2));
+    plugin_->attach(this);
     apply();
   }
 
@@ -181,219 +198,106 @@ class DialTile : public tessera::Tile {
     raw_ = reading_.reported;
     if (raw_ != NO_VALUE) reading_.reported = plugin_->trust(entity_, raw_);
     plugin_->note(static_cast<int>(reading_.mood), reading_.current);
-    if (pending_active_ && reading_.reported != NO_VALUE && std::abs(reading_.reported - pending_) <= NEAR) settle();   // Home Assistant brought the target we chose
-    if (!pending_active_) shown_ = reading_.reported;
     apply();
   }
 
-  void on_theme() override { apply(); }
+  void on_theme() override {
+    painted_ = false;
+    apply();
+  }
 
-  // A tap on a key does what the key says; a tap anywhere else opens the dial.
+  // A tap on the key changes the unit the glass shows; a tap anywhere else opens the dial.
   void on_tap() override {
-    if (reading_.mood == Mood::UNAVAILABLE) return;
     const tessera::Point at = tessera::tap_point();
-    if (keys_on_) {
-      // A tap in the keys' row is for the key nearest to it, also in the gap between two or just above them: a finger
-      // that misses a key by a little never opens the dial instead.
-      const int slack = ui::mm(2);
-      if (at.y >= key_y_ - slack && at.y < key_y_ + key_h_ + slack) {
-        int best = -1, best_d = INT_MAX;
-        for (int i = 0; i < 3; ++i) {
-          if (!key_shown(i)) continue;
-          const int centre = key_x_[i] + key_w_ / 2, d = std::abs(at.x - centre);
-          if (d < best_d && (!side_.on || d <= key_w_ / 2 + slack)) best = i, best_d = d;
-        }
-        if (best >= 0) return press_key(best);
-        if (!side_.on) return;
-      }
+    const int slack = ui::mm(2);
+    if (key_ && at.x >= key_x_ - slack && at.y >= key_y_ - slack) {
+      plugin_->toggle_unit();
+      apply();
+      return;
     }
-    // A change that still waits goes out now, so the dial opens on the number just chosen.
-    if (debounce_on_) {
-      debounce_on_ = false;
-      send(shown_);
-    }
+    if (reading_.mood == Mood::UNAVAILABLE) return;
     tessera::open_card(plugin_->plugin_id(), "dial", entity_, tile_);
   }
 
-  // Called by the plugin every 250 ms: the waits of this tile.
-  void tick(uint32_t now) {
-    // The unit was changed (the key on the card, or the switch in Home Assistant): the tile follows at once.
-    if (plugin_->shows_fahrenheit() != unit_f_) {
-      unit_f_ = plugin_->shows_fahrenheit();
-      apply();
-    }
-    if (debounce_on_ && expired(now, debounce_since_, DEBOUNCE_MS)) {
-      debounce_on_ = false;
-      send(shown_);
-    }
-    if (confirm_on_ && expired(now, confirm_since_, CONFIRM_MS)) {
-      settle();                          // no answer yet: the wait ends, the chosen target stays until HOLD_MS
-      shown_ = reading_.reported;
-      apply();
-    }
-    // A late report was set aside for a while: when that while is over, what Home Assistant says counts again.
-    if (!pending_active_ && !debounce_on_ && raw_ != NO_VALUE && plugin_->trust(entity_, raw_) != reading_.reported) {
+  // Called by the plugin every 250 ms. The unit was changed (the key on the card, or the switch in Home Assistant), or
+  // a target was chosen on the dial (or the wait after it is over): the tile follows at once.
+  void tick(uint32_t) {
+    bool changed = plugin_->shows_fahrenheit() != unit_f_;
+    if (raw_ != NO_VALUE && plugin_->trust(entity_, raw_) != reading_.reported) {
       reading_.reported = plugin_->trust(entity_, raw_);
-      shown_ = reading_.reported;
-      apply();
+      changed = true;
     }
+    if (changed) apply();
   }
 
  private:
-  void make_keys(const tessera::TileContext &c) {
-    for (int i = 0; i < 3; ++i) {
-      keys_[i] = ui::block(c.parent, theme::TRACK);
-      key_labels_[i] = ui::label(keys_[i], Font::BODY_LARGE, theme::INK);
-      lv_obj_center(key_labels_[i]);
-    }
-    ui::set_text(key_labels_[0], "-");
-    ui::set_text(key_labels_[2], "+");
+  // A label's text, set only when it differs: a tile that is told the same again does not flicker.
+  static void put(lv_obj_t *label, std::string &was, const std::string &text) {
+    if (!label || was == text) return;
+    was = text;
+    ui::set_text(label, text);
   }
 
-  bool key_shown(int i) const { return !lv_obj_has_flag(keys_[i], LV_OBJ_FLAG_HIDDEN); }
-
-  // The row of keys: three with a mode key, two without, equal widths.
-  // The mode key needs a tile two cells wide; one cell wide has - and + only.
-  void place_keys() {
-    if (side_.on) {                                   // - at the left, + at the right, no mode key
-      key_w_ = side_.key_w;
-      key_h_ = side_.key_h;
-      key_y_ = side_.key_y;
-      key_x_[0] = side_.left_x;
-      key_x_[2] = side_.right_x;
-      lv_obj_add_flag(keys_[1], LV_OBJ_FLAG_HIDDEN);
-      for (int i = 0; i < 3; i += 2) {
-        lv_obj_remove_flag(keys_[i], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_size(keys_[i], key_w_, key_h_);
-        lv_obj_set_pos(keys_[i], key_x_[i], key_y_);
-      }
-      return;
-    }
-    key_h_ = layout_.key_h;
-    key_y_ = layout_.keys_y;
-    // - and +, and between them on a tile two cells wide the key for the unit; never a key for the mode.
-    const int count = columns_ >= 2 ? 3 : 2;
-    const int gap = ui::px(4);
-    key_w_ = (w_ - gap * (count - 1)) / count;
-    int slot = 0;
-    for (int i = 0; i < 3; ++i) {
-      if (i == 1 && count == 2) {
-        lv_obj_add_flag(keys_[i], LV_OBJ_FLAG_HIDDEN);
-        continue;
-      }
-      lv_obj_remove_flag(keys_[i], LV_OBJ_FLAG_HIDDEN);
-      key_x_[i] = slot++ * (key_w_ + gap);
-      lv_obj_set_size(keys_[i], key_w_, key_h_);
-      lv_obj_set_pos(keys_[i], key_x_[i], key_y_);
-    }
-  }
-
-  // Everything that shows, from the state as it is now: the value shown, colours, words.
+  // Everything that shows, from the state as it is now. Only what changed is painted.
   void apply() {
     const bool offline = reading_.mood == Mood::UNAVAILABLE;
-    const bool has_value = shown_ != NO_VALUE && !offline;
-    ui::set_text(center_, has_value ? plugin_->show(shown_, decimal_) : std::string("-"));
-    // Heating: Home Assistant's amber; cooling: the screen's blue; idle, off or offline keep the usual colours.
-    // Amber while the number is the guest's own and the thermostat has not taken it yet; else the colour of what it does.
-    ui::set_tone(center_, offline ? tessera::Tone::NORMAL : pending_active_ ? tessera::Tone::BUSY : mood_tone(reading_.mood),
-                 offline ? theme::MUTED : theme::INK);
-    ui::set_color(name_, theme::MUTED);
-    if (show_info_) place_info(offline);
-    if (keys_on_) {
-      place_keys();
-      for (int i = 0; i < 3; ++i) ui::set_color(key_labels_[i], offline ? theme::MUTED : theme::INK);
-      ui::set_text(key_labels_[1], plugin_->shows_fahrenheit() ? "\xC2\xB0" "C" : "\xC2\xB0" "F");   // what a tap changes to
-    }
-  }
-
-  // Under the number: "Now 19.8°" and the state's icon (zzz when idle) as one row, centred on the number.
-  void place_info(bool offline) {
-    const std::string now = !offline && reading_.current != NO_VALUE
-                                ? tessera::fill(plugin_->text("now"), "n", plugin_->show(reading_.current, decimal_))
-                                : std::string();
-    const uint32_t code = offline ? 0 : glyph_code(glyph_of(reading_.mood));
+    unit_f_ = plugin_->shows_fahrenheit();
+    const tessera::Tone tone = offline ? tessera::Tone::NORMAL : reading_.mood == Mood::HEATING ? tessera::Tone::ALERT
+                                                                 : mood_tone(reading_.mood);
+    const int number = reading_.current != NO_VALUE ? reading_.current : reading_.reported;
+    put(center_, center_text_, !offline && number != NO_VALUE ? plugin_->show(number, decimal_) : std::string("-"));
+    std::string line = mood_word(plugin_, reading_.mood);
+    if (!offline && reading_.reported != NO_VALUE)
+      line += " \xC2\xB7 " + tessera::fill(plugin_->text("target"), "n", plugin_->show(reading_.reported, decimal_));
+    const uint32_t code = offline ? 0 : reading_.mood == Mood::IDLE ? 0xF0238 : glyph_code(glyph_of(reading_.mood));
     const std::string icon = code ? ui::icon(code) : "";
-    ui::set_text(now_, now);
-    ui::set_text(glyph_, icon);
-    const tessera::Tone tone = offline ? tessera::Tone::NORMAL : mood_tone(reading_.mood);
-    ui::set_tone(now_, tone, theme::MUTED);
-    ui::set_tone(glyph_, tone, theme::INK);
-    const int nw = now.empty() ? 0 : ui::text_width(now, Font::BODY);
-    const int iw = icon.empty() ? 0 : ui::text_width(icon, Font::ICON_SMALL);
-    const int gap = nw && iw ? ui::px(8) : 0;
-    const int x = region_x_ + std::max(0, (region_w_ - (nw + gap + iw)) / 2);
-    lv_obj_set_width(now_, std::max(1, nw + ui::px(2)));
-    lv_obj_set_pos(now_, x, info_y_ + (info_h_ - ui::line_height(Font::BODY)) / 2);
-    lv_obj_set_width(glyph_, std::max(1, iw));
-    lv_obj_set_pos(glyph_, x + nw + gap, info_y_ + (info_h_ - ui::line_height(Font::ICON_SMALL)) / 2);
-  }
-
-  // - or +: the shown value moves one step; one command follows DEBOUNCE_MS after the last tap (at once when this tile
-  // has no tick to wait on).
-  void bump(int direction) {
-    const int base = shown_ != NO_VALUE ? shown_ : reading_.reported;
-    if (base == NO_VALUE) return;                     // a thermostat without a target: nothing to move
-    shown_ = from_step(to_step(base, reading_.range) + direction, reading_.range);
-    pending_ = shown_;
-    pending_active_ = true;
-    apply();
-    if (attached_) {
-      debounce_on_ = true;
-      debounce_since_ = millis();
-    } else {
-      send(shown_);
+    const bool moved = icon != icon_text_;
+    put(status_icon_, icon_text_, icon);
+    put(status_, status_text_, line);
+    if (status_ && (moved || !painted_)) {
+      const int iw = icon.empty() ? 0 : ui::text_width(icon, Font::ICON_SMALL) + ui::px(6);
+      lv_obj_set_width(status_icon_, std::max(1, iw));
+      lv_obj_set_pos(status_icon_, 0, status_y_ + (status_h_ - ui::line_height(Font::ICON_SMALL)) / 2);
+      lv_obj_set_width(status_, std::max(1, w_ - iw));
+      lv_obj_set_pos(status_, iw, status_y_ + (status_h_ - ui::line_height(Font::BODY)) / 2);
     }
-  }
-
-  void send(int value) {
-    if (value == NO_VALUE || value == reading_.reported) {   // already there: nothing to tell Home Assistant
-      settle();
-      apply();
-      return;
+    put(key_label_, key_text_, unit_f_ ? "\xC2\xB0" "C" : "\xC2\xB0" "F");   // what a tap changes to
+    // The gauge fills from the lowest to the highest a guest may set, to the temperature of the room.
+    int fill = 0;
+    if (!offline && reading_.current != NO_VALUE && reading_.range.hi > reading_.range.lo)
+      fill = std::clamp((reading_.current - reading_.range.lo) * 100 / (reading_.range.hi - reading_.range.lo), 2, 100);
+    if (arc_ && (fill != fill_ || !painted_)) lv_arc_set_value(arc_, fill);
+    fill_ = fill;
+    if (tone != tone_ || offline != offline_ || !painted_) {
+      ui::set_tone(center_, tone, offline ? theme::MUTED : theme::INK);
+      if (status_) {
+        ui::set_tone(status_, tone, theme::MUTED);
+        ui::set_tone(status_icon_, tone, theme::MUTED);
+      }
+      if (arc_) {
+        lv_obj_set_style_arc_color(arc_, ui::color(theme::TRACK), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(arc_, offline ? ui::color(theme::TRACK) : ui::tone_color(tone, theme::MUTED), LV_PART_INDICATOR);
+      }
+      ui::set_color(name_, theme::MUTED);
+      if (hint_) ui::set_color(hint_, theme::MUTED);
+      if (key_label_) ui::set_color(key_label_, theme::INK);
+      tone_ = tone;
+      offline_ = offline;
     }
-    pending_ = value;
-    pending_active_ = true;
-    if (raw_ != NO_VALUE) plugin_->chose(entity_, raw_, value);
-    reading_.reported = value;   // believed until Home Assistant names a third
-    JsonDocument fields;
-    fields["temperature"] = value / 10.0;   // tenths of a degree, sent as a number
-    tessera::action("climate.set_temperature", entity_, fields);
-    confirm_on_ = attached_;
-    confirm_since_ = millis();
-  }
-
-  void settle() {
-    pending_active_ = false;
-    confirm_on_ = false;
-  }
-
-  void press_key(int index) {
-    if (index == 1) {   // the unit: what the glass shows, never the thermostat
-      plugin_->toggle_unit();
-      unit_f_ = plugin_->shows_fahrenheit();
-      apply();
-      return;
-    }
-    bump(index == 0 ? -1 : 1);
+    painted_ = true;
   }
 
   GuestThermostat *plugin_;
   char entity_[96]{};
   Reading reading_;
-  int w_ = 0, h_ = 0, tile_ = -1, key_w_ = 0, key_h_ = 0, key_y_ = 0;
-  int region_x_ = 0, region_w_ = 0, info_y_ = 0, info_h_ = 0;
-  int columns_ = 1;
-  bool show_info_ = false, keys_on_ = false;
-  int key_x_[3]{};
-  Layout layout_;
-  SideLayout side_;
+  int w_ = 0, h_ = 0, tile_ = -1;
+  int status_y_ = 0, status_h_ = 0, key_x_ = 0, key_y_ = 0, key_w_ = 0, key_h_ = 0;
   char decimal_ = '.';
-  int shown_ = NO_VALUE, pending_ = NO_VALUE, raw_ = NO_VALUE;
-  bool pending_active_ = false, attached_ = false, unit_f_ = false;
-  bool debounce_on_ = false, confirm_on_ = false;
-  uint32_t debounce_since_ = 0, confirm_since_ = 0;
-  lv_obj_t *name_{}, *center_{}, *now_{}, *glyph_{};
-  lv_obj_t *keys_[3]{}, *key_labels_[3]{};
+  int raw_ = NO_VALUE, fill_ = -1;
+  bool unit_f_ = false, painted_ = false, offline_ = false;
+  tessera::Tone tone_ = tessera::Tone::NORMAL;
+  std::string center_text_, status_text_, icon_text_, key_text_;
+  lv_obj_t *name_{}, *center_{}, *status_{}, *status_icon_{}, *arc_{}, *key_{}, *key_label_{}, *hint_{};
 };
 
 // ---- The card: the dial, like Home Assistant's thermostat card. A finger drags the ring; the card keeps its drags ----

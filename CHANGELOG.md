@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - 2026-11-15
+
+- The tile is a gauge now: the room's temperature in a ring, what the heating does and its target above it, a key for
+  the unit and "Tap to adjust". The target is set on the dial's card only, with its - and + keys or the ring.
+- The tile paints only what changed, so it no longer flickers.
+
 ## 0.1.1 - 2026-11-15
 
 - `ignore_other_unit`: reports in the other unit (a second, late source of the same thermostat) are left unread.

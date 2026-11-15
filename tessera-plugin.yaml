@@ -1,7 +1,7 @@
 # Guest thermostat: a tile for a climate entity with - and + keys; a tap opens a card with a dial to drag. A guest sets
 # the temperature within limits and nothing else: no mode, no on or off. Made from Thermo dial by alexcoscia (MIT).
 id: guest_thermostat
-version: 0.1.1
+version: 0.2.0
 api: "0.12"
 icon: thermometer
 maintainer: flinty1970
