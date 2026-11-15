@@ -1,0 +1,147 @@
+#pragma once
+// Logica pura del quadrante: nessun ESPHome, nessun LVGL, così gira anche su questo computer (tests/test_logic.cpp).
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <vector>
+
+namespace esphome::guest_thermostat {
+
+// Decimi di grado: l'arco lavora su interi e HA parla in gradi con un decimale.
+struct Range {
+  int lo = 70, hi = 350, step = 5;
+};
+
+inline int tenths(double degrees) { return (int) std::lround(degrees * 10.0); }
+
+// Dall'entità (min_temp, max_temp, target_temp_step). Un passo che manca o non è positivo vale 0,5; un massimo che non
+// supera il minimo rimette 7 e 35.
+inline Range make_range(double lo, double hi, double step) {
+  Range r;
+  if (hi > lo) {
+    r.lo = tenths(lo);
+    r.hi = tenths(hi);
+  }
+  const int s = tenths(step);
+  r.step = s > 0 ? s : 5;
+  if (r.hi - r.lo < r.step) r.hi = r.lo + r.step;
+  return r;
+}
+
+inline int steps(const Range &r) { return (r.hi - r.lo) / r.step; }
+
+// Dal valore in decimi al passo più vicino, dentro l'intervallo.
+inline int to_step(int t, const Range &r) {
+  const int clamped = std::min(std::max(t, r.lo), r.hi);
+  return std::min((clamped - r.lo + r.step / 2) / r.step, steps(r));
+}
+
+inline int from_step(int n, const Range &r) { return r.lo + std::min(std::max(n, 0), steps(r)) * r.step; }
+
+// "21.5": il separatore è quello della lingua dello schermo (solo per il testo); HA riceve sempre il punto.
+inline std::string format(int t, char separator) {
+  char buf[24];
+  const int a = t < 0 ? -t : t;
+  std::snprintf(buf, sizeof buf, "%s%d%c%d", t < 0 ? "-" : "", a / 10, separator, a % 10);
+  return buf;
+}
+
+enum class Mood { HEATING, COOLING, IDLE, OFF, UNAVAILABLE };
+
+// Da `state` (la modalità di HA: off, heat, cool, auto…) e dall'attributo hvac_action. Senza hvac_action ci si fida
+// della modalità, perché non tutti i termostati lo danno.
+inline Mood mood_of(const std::string &state, const std::string &action) {
+  if (state.empty() || state == "unavailable" || state == "unknown") return Mood::UNAVAILABLE;
+  if (state == "off") return Mood::OFF;
+  if (action == "heating") return Mood::HEATING;
+  if (action == "cooling") return Mood::COOLING;
+  if (action.empty()) {
+    if (state == "heat") return Mood::HEATING;
+    if (state == "cool") return Mood::COOLING;
+  }
+  return Mood::IDLE;
+}
+
+// L'icona accanto alla parola dello stato: fiammella, fiocco, interruttore, le zzz per l'inattivo o niente.
+enum class Glyph { FIRE, SNOWFLAKE, POWER, SLEEP, NONE };
+
+inline Glyph glyph_of(Mood mood) {
+  switch (mood) {
+    case Mood::HEATING: return Glyph::FIRE;
+    case Mood::COOLING: return Glyph::SNOWFLAKE;
+    case Mood::OFF: return Glyph::POWER;
+    case Mood::IDLE: return Glyph::SLEEP;
+    default: return Glyph::NONE;
+  }
+}
+
+// La modalità dopo `current`; "" quando ce n'è una sola o nessuna. Una modalità che la lista non conosce riparte dalla prima.
+inline std::string next_mode(const std::vector<std::string> &modes, const std::string &current) {
+  if (modes.size() < 2) return "";
+  const auto it = std::find(modes.begin(), modes.end(), current);
+  const size_t i = it == modes.end() ? 0 : ((size_t)(it - modes.begin()) + 1) % modes.size();
+  return modes[i];
+}
+
+// Dove stanno l'arco e i tasti in un tile di w×h pixel. L'arco da 2×2 in su, sempre a `margin` pixel dai bordi; i tasti
+// dove c'è posto e `allow_keys`: sotto l'arco, che resta più alto dei tasti.
+struct Layout {
+  bool dial = false, keys = false;
+  int d = 0, x = 0, y = 0;     // il quadrato dell'arco
+  int keys_y = 0, key_h = 0;   // la riga dei tasti
+};
+
+// `arc` false: the tile (no arc, only keys). Keys need two cells or more, in either direction (1x1 has none).
+inline Layout layout(int w, int h, int columns, int rows, int key_h, int margin, bool allow_keys = true, bool arc = true) {
+  Layout l;
+  l.dial = arc && columns >= 2 && rows >= 2;
+  if (l.dial) {
+    l.keys = allow_keys && h >= 3 * key_h + 2 * margin;
+    l.key_h = l.keys ? key_h : 0;
+    l.d = std::max(1, std::min(w - 2 * margin, h - l.key_h - 2 * margin));
+    l.x = (w - l.d) / 2;
+    l.y = margin;
+    l.keys_y = l.keys ? l.y + l.d + margin : 0;
+  } else {
+    l.keys = (columns >= 2 || rows >= 2) && h >= 2 * key_h;
+    l.key_h = l.keys ? key_h : 0;
+    l.keys_y = h - l.key_h;
+  }
+  return l;
+}
+
+// Il tile largo e basso (2 colonne o più, una riga): - a sinistra, + a destra, in mezzo il numero con sotto la temperatura
+// reale e lo stato. `on` è falso se in mezzo non resta almeno la larghezza di un tasto.
+struct SideLayout {
+  bool on = false;
+  int key_w = 0, key_h = 0, key_y = 0;   // i due tasti, uguali, centrati in altezza
+  int left_x = 0, right_x = 0;           // a sinistra e a destra
+  int mid_x = 0, mid_w = 0;              // la fascia in mezzo
+};
+
+inline SideLayout side_layout(int w, int h, int columns, int rows, int key_w, int key_h_max, int gap) {
+  SideLayout s;
+  if (columns < 2 || rows != 1 || key_w <= 0 || h <= 0) return s;
+  if (w < 3 * key_w + 2 * gap) return s;
+  s.on = true;
+  s.key_w = key_w;
+  s.key_h = std::min(key_h_max, h);
+  s.key_y = (h - s.key_h) / 2;
+  s.left_x = 0;
+  s.right_x = w - key_w;
+  s.mid_x = key_w + gap;
+  s.mid_w = w - 2 * (key_w + gap);
+  return s;
+}
+
+// Il tempo passato dal momento `since`, anche a cavallo del giro dei millisecondi.
+// A `since` that is a moment later than `now` (taken after `now` was read) has not expired: without this the wait for
+// Home Assistant ended in the very tick that started it, and the number jumped back to the old target.
+inline bool expired(uint32_t now, uint32_t since, uint32_t limit) {
+  const uint32_t passed = now - since;
+  return passed < 0x80000000u && passed >= limit;
+}
+
+}  // namespace esphome::guest_thermostat

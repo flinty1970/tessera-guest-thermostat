@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "name": "English"
+  },
+  "screen": {
+    "decimal": ".",
+    "now": "Now {n}",
+    "heating": "Heating",
+    "cooling": "Cooling",
+    "idle": "Idle",
+    "off": "Off",
+    "unavailable": "Unavailable",
+    "show_f": "Show \u00b0F",
+    "show_c": "Show \u00b0C"
+  },
+  "app": {
+    "name": "Guest thermostat",
+    "summary": "A thermostat a guest can turn up or down within limits, and nothing else.",
+    "tile_name": "Guest thermostat",
+    "card_name": "Thermostat",
+    "bar_heating": "Heating now",
+    "bar_example": "18.5\u00b0C",
+    "tile_example": "Heating 21.0\u00b0C",
+    "setting_fahrenheit": "Show Fahrenheit",
+    "setting_fahrenheit_hint": "What the screen shows: Celsius unless this is on. A guest changes it with the key on the dial's card; the thermostat itself is not changed."
+  }
+}

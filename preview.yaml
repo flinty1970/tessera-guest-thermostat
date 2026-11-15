@@ -1,0 +1,25 @@
+# What tools/preview.py shows (docs/PREVIEW.md): a thermostat heating, one idle, one whose numbers arrive in Fahrenheit.
+tiles:
+  - tile: dial
+    name: Heating
+    entity: climate.house
+    sizes: [2x3, 2x1, 2x2, 1x1, 1x2]
+  - tile: dial
+    name: Bedroom
+    entity: climate.bedroom
+    sizes: [2x1]
+  - tile: dial
+    name: Annexe
+    entity: climate.annexe
+    sizes: [2x1]
+
+states:
+  climate.house:
+    state: heat
+    attributes: { temperature: 21.0, current_temperature: 19.8, min_temp: 5, max_temp: 32, target_temp_step: 0.5, hvac_action: heating }
+  climate.bedroom:
+    state: auto
+    attributes: { temperature: 19, current_temperature: 19.4, min_temp: 5, max_temp: 32, target_temp_step: 0.5, hvac_action: idle }
+  climate.annexe:
+    state: heat
+    attributes: { temperature: 64.4, current_temperature: 65.1, min_temp: 41, max_temp: 89.6, target_temp_step: 1, hvac_action: idle }

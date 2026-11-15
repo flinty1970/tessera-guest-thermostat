@@ -1,0 +1,40 @@
+# Guest thermostat: a tile for a climate entity with - and + keys; a tap opens a card with a dial to drag. A guest sets
+# the temperature within limits and nothing else: no mode, no on or off. Made from Thermo dial by alexcoscia (MIT).
+id: guest_thermostat
+version: 0.1.1
+api: "0.12"
+icon: thermometer
+maintainer: flinty1970
+license: MIT
+stage: beta
+topics: [home]
+requires:
+  esphome: 2026.6.2
+boards: any
+flash_kb: 8
+
+permissions:
+  # The dial's and the - and + keys' only command.
+  home_assistant_actions: [climate.set_temperature]
+
+cards:
+  - { id: dial, name: card_name }
+
+# In the top bar: what the heating does (a red flame, or the resting icon in green) and the temperature now.
+bar_items:
+  - { id: heating, label: bar_heating, icon: thermometer, example: bar_example }
+
+tiles:
+  - id: dial
+    name: tile_name
+    icon: thermometer
+    # From 1x1: the editor starts a tile at one cell and grows it one axis at a time, so a larger minimum has no handles.
+    sizes: { min: 1x1, max: 9x9 }
+    memory: 3000
+    domains: [climate]
+    attributes: [temperature, current_temperature, min_temp, max_temp, target_temp_step, hvac_action]
+    example: tile_example
+    preview: { title: "{name}", value: "{temperature}" }
+
+settings:
+  - { key: thermostat_shows_fahrenheit, label: setting_fahrenheit, hint: setting_fahrenheit_hint }

@@ -1,0 +1,16 @@
+# What a screen gets when it takes this plugin: the component with the limits a guest may set (in the thermostat's own
+# unit) and a switch for the unit the glass shows. The switch is in Home Assistant too, so an automation can put it
+# back to Celsius when a guest leaves.
+switch:
+  - platform: template
+    id: guest_thermostat_fahrenheit
+    name: "Thermostat shows Fahrenheit"
+    icon: mdi:temperature-fahrenheit
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+guest_thermostat:
+  fahrenheit: guest_thermostat_fahrenheit
+  min_temp: 7
+  max_temp: 32
+  unit: C
