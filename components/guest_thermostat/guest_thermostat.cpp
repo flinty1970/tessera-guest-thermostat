@@ -165,17 +165,50 @@ class DialTile : public tessera::Tile {
       hint_ = ui::label(c.parent, Font::BODY, theme::MUTED);
       ui::set_text(hint_, plugin_->text("tap_adjust"));
       lv_obj_set_width(hint_, hint_w);
+      lv_obj_set_style_text_align(hint_, key_ ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_set_pos(hint_, 0, h_ - key_h + (key_h - body_h) / 2);
     }
-    // Between them the gauge, an arc as on the dial that fills to the room's temperature, with that number in it. A
-    // tile too small for the ring has the number alone.
+    // Between them the gauge: a ring as on the dial that fills to the room's temperature. Where the number fits in the
+    // ring it stands there; on a lower tile the ring stands at the left with the flame in it and the number beside it
+    // (as the gauge of a sensor); a tile with no room for a ring has the flame and the number.
+    const std::string widest = "88.8\xC2\xB0" "C";
     const int room = bottom - top, d = std::min(w_, room);
-    const int ring = std::max(ui::px(6), d / 12);
-    if (d >= ui::text_width("88.8\xC2\xB0" "C", Font::VALUE) + 2 * ring + ui::px(12)) {
+    const int ring = std::max(ui::px(5), d / 10), pad = ui::px(10);
+    const int tw = ui::text_width(widest, Font::VALUE) + ui::px(4), tw2 = ui::text_width(widest, Font::BODY_LARGE) + ui::px(4);
+    Font number_font = Font::VALUE;
+    int number_x = 0, number_w = w_, arc_x = (w_ - d) / 2, icon_x = 0, icon_w = 0;
+    bool with_ring = false, icon_in_ring = false, number_centred = true;
+    Font icon_font = Font::ICON_SMALL;
+    if (d >= tw + 2 * ring + pad) {
+      with_ring = true;                                   // the number in the ring
+    } else if (d >= ui::mm(8) && w_ >= d + pad + tw) {
+      with_ring = icon_in_ring = true;                    // the ring, and the number beside it
+      number_centred = false;
+      arc_x = (w_ - (d + pad + tw)) / 2;
+      number_x = arc_x + d + pad;
+      number_w = tw;
+      if (ui::line_height(Font::ICON) + 2 * ring + ui::px(6) <= d) icon_font = Font::ICON;
+      icon_x = arc_x;
+      icon_w = d;
+    } else if (d >= tw2 + 2 * ring + pad) {
+      with_ring = true;                                   // a smaller number in the ring
+      number_font = Font::BODY_LARGE;
+    } else {
+      const int iw = ui::text_width(ui::icon(0xF0238), Font::ICON_SMALL) + ui::px(6);
+      if (w_ >= iw + tw) {                                // no ring: the flame, and the number
+        number_centred = false;
+        icon_x = (w_ - (iw + tw)) / 2;
+        icon_w = iw;
+        number_x = icon_x + iw;
+        number_w = tw;
+      }
+    }
+    const int arc_y = top + (room - d) / 2;
+    if (with_ring) {
       arc_ = lv_arc_create(c.parent);
       lv_obj_remove_style_all(arc_);
       lv_obj_set_size(arc_, d, d);
-      lv_obj_set_pos(arc_, (w_ - d) / 2, top + (room - d) / 2);
+      lv_obj_set_pos(arc_, arc_x, arc_y);
       lv_arc_set_rotation(arc_, 135);
       lv_arc_set_bg_angles(arc_, 0, 270);
       lv_arc_set_range(arc_, 0, 100);
@@ -185,10 +218,16 @@ class DialTile : public tessera::Tile {
       }
       lv_obj_remove_flag(arc_, LV_OBJ_FLAG_CLICKABLE);   // a gauge only: the finger goes through to the tile
     }
-    center_ = ui::label(c.parent, Font::VALUE, theme::INK);
-    lv_obj_set_width(center_, w_);
-    lv_obj_set_style_text_align(center_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(center_, 0, top + std::max(0, (room - value_h) / 2));
+    if (icon_w > 0) {
+      gauge_icon_ = ui::label(c.parent, icon_font, theme::INK);
+      lv_obj_set_width(gauge_icon_, icon_w);
+      lv_obj_set_style_text_align(gauge_icon_, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_set_pos(gauge_icon_, icon_x, top + std::max(0, (room - ui::line_height(icon_font)) / 2));
+    }
+    center_ = ui::label(c.parent, number_font, theme::INK);
+    lv_obj_set_width(center_, number_w);
+    lv_obj_set_style_text_align(center_, number_centred ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_pos(center_, number_x, top + std::max(0, (room - ui::line_height(number_font)) / 2));
     plugin_->attach(this);
     apply();
   }
@@ -251,9 +290,14 @@ class DialTile : public tessera::Tile {
       line += " \xC2\xB7 " + tessera::fill(plugin_->text("target"), "n", plugin_->show(reading_.reported, decimal_));
     const uint32_t code = offline ? 0 : reading_.mood == Mood::IDLE ? 0xF0238 : glyph_code(glyph_of(reading_.mood));
     const std::string icon = code ? ui::icon(code) : "";
+    // A narrow tile has no room for both: the target stays, and the flame's colour says what the heating does.
+    if (!offline && reading_.reported != NO_VALUE && !icon.empty() &&
+        ui::text_width(line, Font::BODY) > w_ - ui::text_width(icon, Font::ICON_SMALL) - ui::px(8))
+      line = tessera::fill(plugin_->text("target"), "n", plugin_->show(reading_.reported, decimal_));
     const bool moved = icon != icon_text_;
     put(status_icon_, icon_text_, icon);
     put(status_, status_text_, line);
+    put(gauge_icon_, gauge_icon_text_, icon);
     if (status_ && (moved || !painted_)) {
       const int iw = icon.empty() ? 0 : ui::text_width(icon, Font::ICON_SMALL) + ui::px(6);
       lv_obj_set_width(status_icon_, std::max(1, iw));
@@ -274,6 +318,7 @@ class DialTile : public tessera::Tile {
         ui::set_tone(status_, tone, theme::MUTED);
         ui::set_tone(status_icon_, tone, theme::MUTED);
       }
+      if (gauge_icon_) ui::set_tone(gauge_icon_, tone, theme::MUTED);
       if (arc_) {
         lv_obj_set_style_arc_color(arc_, ui::color(theme::TRACK), LV_PART_MAIN);
         lv_obj_set_style_arc_color(arc_, offline ? ui::color(theme::TRACK) : ui::tone_color(tone, theme::MUTED), LV_PART_INDICATOR);
@@ -296,8 +341,8 @@ class DialTile : public tessera::Tile {
   int raw_ = NO_VALUE, fill_ = -1;
   bool unit_f_ = false, painted_ = false, offline_ = false;
   tessera::Tone tone_ = tessera::Tone::NORMAL;
-  std::string center_text_, status_text_, icon_text_, key_text_;
-  lv_obj_t *name_{}, *center_{}, *status_{}, *status_icon_{}, *arc_{}, *key_{}, *key_label_{}, *hint_{};
+  std::string center_text_, status_text_, icon_text_, key_text_, gauge_icon_text_;
+  lv_obj_t *name_{}, *center_{}, *status_{}, *status_icon_{}, *arc_{}, *key_{}, *key_label_{}, *hint_{}, *gauge_icon_{};
 };
 
 // ---- The card: the dial, like Home Assistant's thermostat card. A finger drags the ring; the card keeps its drags ----
